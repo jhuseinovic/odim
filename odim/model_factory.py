@@ -154,7 +154,7 @@ class ModelFactory(object):
     if not file_uri:
       file_uri = "schemas/src/"+database+"/"+collection_name.lower() +".json"
     file = location_tester(file_uri)
-    assert file, "No schema json was found."
+    assert file, f"No schema json was found. {file_uri} does not exist"
 
     if not signal_file:
       signal_file = "schemas/dist/python3/odim/hooks/"+database+"/"+collection_name.lower() +".py"

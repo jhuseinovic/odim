@@ -225,7 +225,7 @@ class OdimMongo(Odim):
     except Exception as e:
       if retries > 5:
             raise
-      log.warn(f'Mongo Query returned an error, retrying find({query})! {e}')
+      log.error(f'Mongo Query returned an error, retrying find({query})! {e}')
       sleep(.2)
       return await self.find(query, params, include_deleted, retries=retries+1)
 
@@ -242,7 +242,7 @@ class OdimMongo(Odim):
     except Exception as e:
       if retries > 5:
         raise
-      log.warn(f'Mongo Query returned an error, retrying count({query})! {e}')
+      log.error(f'Mongo Query returned an error, retrying count({query})! {e}')
       sleep(.2)
       return await self.count(query, include_deleted, retries=retries+1)
 
