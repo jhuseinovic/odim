@@ -77,7 +77,7 @@ class ObjectId(BsonObjectId):
 
 
 class BaseMongoModel(BaseOdimModel):
-  id: Optional[ObjectId] = Field(default=None, alias='_id', description="Unique identifier of the object") #
+  id: Optional[ObjectId] = Field(default=None, alias='_id') #
 
   class Config:
     arbitrary_types_allowed = True
@@ -112,6 +112,25 @@ def convert_decimal(dict_item):
     return dict_item
 
 
+def convert_decimal_from_mongo(dict_item):
+  """Recursively convert bson.Decimal128 values to Python Decimal for model instantiation."""
+  if dict_item is None:
+    return None
+  elif isinstance(dict_item, list):
+    return [convert_decimal_from_mongo(x) for x in dict_item]
+  elif isinstance(dict_item, dict):
+    return {k: convert_decimal_from_mongo(v) for k, v in list(dict_item.items())}
+  elif isinstance(dict_item, bson.Decimal128):
+    # to_decimal returns a Python Decimal
+    try:
+      return dict_item.to_decimal()
+    except Exception:
+      # Fallback via string representation
+      return Decimal(str(dict_item))
+  else:
+    return dict_item
+
+
 class OdimMongo(Odim):
   protocols = ["mongo","mongodb"]
 
@@ -142,6 +161,8 @@ class OdimMongo(Odim):
     ret = db.find_one(qry)
     if not ret:
       raise NotFoundException()
+    # Ensure Decimal128 fields are converted to Decimal for Pydantic
+    ret = convert_decimal_from_mongo(ret)
     ret = self.execute_hooks("pre_init", ret) # we send the DB Object into the PRE_INIT
     x = self.model(**ret)
     x = self.execute_hooks("post_init", x) # we send the Model Obj into the POST_INIT
@@ -238,7 +259,9 @@ class OdimMongo(Odim):
     try:
       results = db.find(query, **find_params)
       for x in results:
-        x2 = self.execute_hooks("pre_init", x)
+        # Normalize Decimal128 fields for Pydantic
+        x2 = convert_decimal_from_mongo(x)
+        x2 = self.execute_hooks("pre_init", x2)
         m = self.model( **x2 )
         rsplist.append( self.execute_hooks("post_init", m) )
       return rsplist

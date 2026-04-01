@@ -26,17 +26,17 @@ class SearchParams(BaseModel):
   ''' Describes how to search the details '''
   offset : int = 0
   limit : int = 25
-  sort : Optional[str] = Field(default=None, description="Order by field list, separated by comma with - signifying descending order. e.g. name,-created_at  will order by name ASC and created_at DESC", pattern="[,a-zA-Z0-9_-]*")
+  sort : Optional[str] = Field(default=None, pattern="[,a-zA-Z0-9_-]*")
 
 class CachedTimestamps(GenericModel, Generic[T]):
-  set : Timestamp = Field(description="Time when the results were cached")
-  expires : Timestamp = Field(description="Time when the results will expire")
+  set : Timestamp = Field(default=None)
+  expires : Timestamp = Field(default=None)
 
 class SearchResponse(GenericModel, Generic[T]):
-  search : dict = Field(description="The search data that was performed")
-  total : int =  Field(description="The total number of results")
+  search : dict = Field(default=None)
+  total : int =  Field(default=None)
   results : List[T]
-  cached : Optional[CachedTimestamps] = Field(description="Optional information if the results were cached.", default=False)
+  cached : Optional[CachedTimestamps] = Field(default=False)
 
   class Config:
     json_encoders = all_json_encoders
@@ -65,14 +65,14 @@ def parse_fieldop(field):
 
 class BaseOdimModel(BaseModel):
 
-  @root_validator(pre=True, skip_on_failure=True)
+  @model_validator(mode='before')
   def generic_validators_pre(cls, values):
     if hasattr(cls, "Config") and hasattr(cls.Config, "odim_hooks"):
       for fnc in cls.Config.odim_hooks.get("pre_validate",[]):
         values = awaited(fnc(cls, values))
     return values
 
-  @root_validator(pre=False, skip_on_failure=True)
+  @model_validator(mode='after')
   def generic_validators_post(cls, values):
     if hasattr(cls, "Config") and hasattr(cls.Config, "odim_hooks"):
       for fnc in cls.Config.odim_hooks.get("post_validate",[]):

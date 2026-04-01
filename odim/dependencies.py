@@ -7,10 +7,10 @@ import re
 class SearchParams:
 
   def __init__( self,
-                q: Optional[str] = Query(None, description="Query string to search. Urlencoded key=value or JSON dictionary with fields"),
-                limit: Optional[int] = Query(description="Limit the number of results to x", default=25),
-                offset: Optional[int] = Query(description="From which record to start", default=0),
-                sort: Optional[str] = Query(None, description="Fields to sort by. Comma separated list of fields (- determines DESC order). ", example="name,-created_at")
+                q: Optional[str] = Query(None),
+                limit: Optional[int] = Query(default=25),
+                offset: Optional[int] = Query(default=0),
+                sort: Optional[str] = Query(None)
               ):
     self.limit = limit
     self.offset = offset
