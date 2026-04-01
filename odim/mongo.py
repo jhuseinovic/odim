@@ -8,7 +8,6 @@ from typing import List, Optional, Union
 import bson
 from bson import ObjectId as BsonObjectId
 from pydantic import Field
-from pydantic_core import core_schema
 from functools import wraps, partial
 import asyncio
 from pymongo import MongoClient, errors
@@ -53,35 +52,16 @@ class ObjectId(BsonObjectId):
         return BsonObjectId(v)
 
     @classmethod
-    def __get_pydantic_core_schema__(cls, source_type, handler):
-        def validate_objid(v):
-            if isinstance(v, BsonObjectId):
-                return v
-            if isinstance(v, cls):
-                return BsonObjectId(str(v))
-            if isinstance(v, str) and BsonObjectId.is_valid(v):
-                return BsonObjectId(v)
-            raise ValueError('Invalid objectid')
-        return core_schema.json_or_python_schema(
-            json_schema=core_schema.str_schema(),
-            python_schema=core_schema.no_info_plain_validator_function(validate_objid),
-            serialization=core_schema.plain_serializer_function_ser_schema(
-                lambda v: str(v),
-                when_used='always'
-            )
-        )
-
-    @classmethod
-    def __get_pydantic_json_schema__(cls, core_schema_, handler):
-        return handler(core_schema_)
+    def __modify_schema__(cls, field_schema):
+        field_schema.update(type='string')
 
 
 class BaseMongoModel(BaseOdimModel):
-  id: Optional[ObjectId] = Field(default=None, alias='_id') #
+  id: Optional[ObjectId] = Field(alias='_id', description="Unique identifier of the object") #
 
   class Config:
     arbitrary_types_allowed = True
-    populate_by_name = True
+    allow_population_by_field_name = True
     # underscore_attrs_are_private = True
     json_encoders = {
       ObjectId: str,

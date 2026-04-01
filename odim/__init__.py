@@ -26,7 +26,7 @@ class SearchParams(BaseModel):
   ''' Describes how to search the details '''
   offset : int = 0
   limit : int = 25
-  sort : Optional[str] = Field(default=None, pattern="[,a-zA-Z0-9_-]*")
+  sort : Optional[str] = Field(default=None, description="Order by field list, separated by comma with - signifying descending order. e.g. name,-created_at  will order by name ASC and created_at DESC", regex="[,a-zA-Z0-9_-]*")
 
 class CachedTimestamps(GenericModel, Generic[T]):
   set : Timestamp = Field(default=None)
@@ -65,14 +65,14 @@ def parse_fieldop(field):
 
 class BaseOdimModel(BaseModel):
 
-  @model_validator(mode='before')
+  @root_validator(pre=True)
   def generic_validators_pre(cls, values):
     if hasattr(cls, "Config") and hasattr(cls.Config, "odim_hooks"):
       for fnc in cls.Config.odim_hooks.get("pre_validate",[]):
         values = awaited(fnc(cls, values))
     return values
 
-  @model_validator(mode='after')
+  @root_validator()
   def generic_validators_post(cls, values):
     if hasattr(cls, "Config") and hasattr(cls.Config, "odim_hooks"):
       for fnc in cls.Config.odim_hooks.get("post_validate",[]):

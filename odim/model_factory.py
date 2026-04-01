@@ -90,7 +90,7 @@ def encode(k, v):
         subcls = {}
         for ks,vs in v.get("child", {}).items():
           subcls[ks] = encode(ks, vs)
-        m = create_model(get_available_class_name(v.get("__title", k)),
+        m = create_model(__model_name=get_available_class_name(v.get("__title", k)),
                          __module__ = "odim.dynmodels",
                          __base__=BaseModel,
                          **subcls)
@@ -109,30 +109,18 @@ def encode(k, v):
       else:
         dt = DM_TYPE_MAPPING.get(v.get("type"), str)
 
-      # Collect constraints for Field; handle regex via JSON Schema 'pattern'
-      constraints_keys = ('gt','ge','lt','le','multiple_of','min_items','max_items','min_length','max_length')
-      field_kwargs = {
-        'description': v.get("__description", v.get("description", "")),
-        'title': v.get("__title", v.get("title")),
-      }
-      # Add standard constraints that Field recognizes in Pydantic v2
-      for ck in constraints_keys:
-        if ck in v:
-          field_kwargs[ck] = v[ck]
-      # Build json_schema_extra for any custom metadata
-      json_schema_extra = {}
-      if 'regex' in v:
-        json_schema_extra['pattern'] = v['regex']
+      field = Field(description=v.get("__description",v.get("description","")), title=v.get("__title", v.get("title")))
       for sk, sv in v.items():
-        if sk not in ("type","child","parent","description","__description","title","__title","required","default_factory","const","alias") and sk not in constraints_keys and sk != 'regex':
-          json_schema_extra[sk] = sv
-      field_kwargs['json_schema_extra'] = json_schema_extra
-      required = v.get("required", False)
-      default_value = v.get("default", ... if required else None)
-      field = Field(default_value, **field_kwargs)
-      if required:
+        if sk not in ("type","child","parent","description","__description","title","__title","required","default_factory","const","alias"):
+          if sk in ('gt','ge','lt','le','multiple_of','min_items','max_items','min_length','max_length','regex'):
+            setattr(field, sk, sv)
+          else:
+            field.extra[sk] =  sv
+      if v.get("required", False) or v.get("default", False) not in ('', False, None):
+        field.default = v.get("default",...) #TODO default value removes the required attribute
         return dt, field
       else:
+        field.default = v.get("default", None)
         return Optional[dt], field
   else: #a string is there as value
     return Optional[DM_TYPE_MAPPING.get(v, str)], None
@@ -164,12 +152,12 @@ class ModelFactory(object):
     assert db_name or db_uri, "Either database_name or database_uri must be specified"
     assert database and collection_name, "database and collection_name must be set"
     if not file_uri:
-      file_uri = "schemas/src/"+database+"/"+collection_name.lower()+".json"
+      file_uri = "schemas/src/"+database+"/"+collection_name.lower() +".json"
     file = location_tester(file_uri)
     assert file, f"No schema json was found. {file_uri} does not exist"
 
     if not signal_file:
-      signal_file = "schemas/dist/python3/odim/hooks/"+database+"/"+collection_name.lower()+".py"
+      signal_file = "schemas/dist/python3/odim/hooks/"+database+"/"+collection_name.lower() +".py"
     signal_file = location_tester(signal_file)
 
     with open(file, "r") as f:
@@ -251,27 +239,22 @@ class ModelFactory(object):
         out[propname]["type"] = "Boolean"
       elif vals["type"] in ("integer","number"):
         out[propname]["type"] = "Number"
+      elif vals["type"].lower() in ("float","double",'decimal'):
+        out[propname]["type"] = "Decimal128"
       elif vals["type"] == "array":
         out[propname]["type"] = "Array"
-      elif vals["type"] == "object":
-        out[propname]["type"] = "Parent"
 
-      if "title" in vals:
-        out[propname]["title"] = vals["title"]
+      if "default" in vals:
+        out[propname]["default"] = vals["default"]
       if "description" in vals:
         out[propname]["description"] = vals["description"]
-      if "enum" in vals:
-        out[propname]["type"] = "Enum"
-        out[propname]["options"] = vals["enum"]
 
-    print(json.dumps(out))
-    return out
 
   @classmethod
   def json_to_fields(cls, js_data):
     if js_data.endswith(".js") or js_data.endswith(".json"):
       filename = js_data[js_data.rindex("/")+1:] if "/" in js_data else js_data
-      filename = filename.replace(".json",") .js").replace(".js",") .js")
+      filename = filename.replace(".json","").replace(".js","")
       with open(js_data, "r") as f:
         data = json.loads(f.read())
     else:
@@ -293,38 +276,24 @@ class ModelFactory(object):
           rest+= f" = Field(description='{v['description']}')"
         print(f"  {k} : {dt} {rest}")
 
+
   @classmethod
   def clone(cls, model : BaseModel.__class__, name : Optional[str] = None, fields : List[str] = [], exclude : List[str] = [], extend : List = []):
-    # Build a new model by selecting a subset of fields; do NOT inherit all fields from base.
-    mfields = deepcopy(getattr(model, 'model_fields'))
-    selected = []
-    for f in list(mfields.keys()):
-      if len(fields) > 0 and f not in fields:
-        continue
-      if f in exclude:
-        continue
-      selected.append(f)
-
-    letter = random.choice(string.ascii_letters)
-    newfws = {"__module__": snake_case_to_camel_case(model.__name__+"_"+letter), "__base__": BaseModel}
-    if not name:
-      name = get_available_class_name(model.__name__+"Copy")
-
-    # Add selected fields from the base model with their annotations and defaults
-    for f in selected:
-      fi = mfields[f]
-      # Determine default: required -> Ellipsis, optional -> provided default or None
-      default = fi.default if fi.default is not None else (... if fi.is_required() else None)
-      newfws[f] = (fi.annotation or Any, default)
-
-    if isinstance(extend, list) and len(extend) > 0:
-      for field in extend:
-        # use specified type for now
-        newfws[field[0]] = ((str if not field[1] else field[1]), ... if field[2] is None else field[2])
-
-    r = create_model(name, **newfws)
-    r.update_forward_refs()
-    return r
+    class new_model(model):
+      pass
+    new_model.__name__ = get_available_class_name( name if name else model.__name__ )
+    oldfields = [ str(x) for x in new_model.__fields__.keys()]
+    if fields and len(fields)>0:
+      for name in oldfields:
+        if name not in fields:
+          del new_model.__fields__[name]
+    for name in exclude:
+      if name not in extend:
+        del new_model.__fields__[name]
+    for xname, xfield in extend:
+      new_model.__fields__[xname] = xfield
+      new_model.__schema_cache__.clear()
+    return new_model
 
 
 if __name__ == "__main__":
