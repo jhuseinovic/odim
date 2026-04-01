@@ -12,6 +12,7 @@ from os import path, getcwd
 from typing import Any, List, Optional, Type, Union
 
 from odim.helper import snake_case_to_camel_case
+import pydantic as _pydantic
 from odim.basesignals import BaseSignals
 from pydantic import BaseModel, Field, create_model
 from odim.mongo import BaseMongoModel, ObjectId
@@ -90,7 +91,7 @@ def encode(k, v):
         subcls = {}
         for ks,vs in v.get("child", {}).items():
           subcls[ks] = encode(ks, vs)
-        m = create_model(__model_name=get_available_class_name(v.get("__title", k)),
+        m = create_model(get_available_class_name(v.get("__title", k)),
                          __module__ = "odim.dynmodels",
                          __base__=BaseModel,
                          **subcls)
@@ -109,13 +110,36 @@ def encode(k, v):
       else:
         dt = DM_TYPE_MAPPING.get(v.get("type"), str)
 
-      field = Field(description=v.get("__description",v.get("description","")), title=v.get("__title", v.get("title")))
+      # Detect pydantic major version to map constraint names
+      try:
+        _ver = getattr(getattr(_pydantic, 'version', None), 'VERSION', getattr(_pydantic, '__version__', '2.0'))
+        _major = int(str(_ver).split('.')[0])
+      except Exception:
+        _major = 2
+      is_v2 = _major >= 2
+
+      # Build Field with supported constraints; map 'regex' -> 'pattern' on v2
+      field_kwargs = {
+        'description': v.get("__description", v.get("description", "")),
+        'title': v.get("__title", v.get("title"))
+      }
+      extras_to_apply = {}
       for sk, sv in v.items():
         if sk not in ("type","child","parent","description","__description","title","__title","required","default_factory","const","alias"):
-          if sk in ('gt','ge','lt','le','multiple_of','min_items','max_items','min_length','max_length','regex'):
-            setattr(field, sk, sv)
+          if sk in ('gt','ge','lt','le','multiple_of','min_items','max_items','min_length','max_length','regex','pattern'):
+            mapped_key = 'pattern' if (sk == 'regex' and is_v2) else ('regex' if (sk == 'regex' and not is_v2) else sk)
+            field_kwargs[mapped_key] = sv
           else:
-            field.extra[sk] =  sv
+            extras_to_apply[sk] = sv
+
+      field = Field(**field_kwargs)
+      if extras_to_apply:
+        extras_attr = 'json_schema_extra' if hasattr(field, 'json_schema_extra') else 'extra'
+        current = getattr(field, extras_attr, None)
+        if current is None:
+          setattr(field, extras_attr, {})
+          current = getattr(field, extras_attr)
+        current.update(extras_to_apply)
       if v.get("required", False) or v.get("default", False) not in ('', False, None):
         field.default = v.get("default",...) #TODO default value removes the required attribute
         return dt, field
@@ -279,6 +303,45 @@ class ModelFactory(object):
 
   @classmethod
   def clone(cls, model : BaseModel.__class__, name : Optional[str] = None, fields : List[str] = [], exclude : List[str] = [], extend : List = []):
+    # Pydantic v2 path: build a fresh model via create_model
+    try:
+      _ver = getattr(getattr(_pydantic, 'version', None), 'VERSION', getattr(_pydantic, '__version__', '2.0'))
+      _major = int(str(_ver).split('.')[0])
+    except Exception:
+      _major = 2
+    if _major >= 2:
+      base_name = get_available_class_name( name if name else model.__name__ )
+      field_defs = {}
+      # Prefer v2 model_fields when available, else fallback to annotations
+      mf = getattr(model, 'model_fields', None)
+      annotations = getattr(model, '__annotations__', {})
+      names = list(mf.keys()) if mf else list(annotations.keys())
+      for fname in names:
+        if fields and len(fields) > 0 and fname not in fields:
+          continue
+        if fname in exclude:
+          continue
+        ann = annotations.get(fname, Any)
+        default = None
+        if mf and fname in mf:
+          default = mf[fname].default
+        field_defs[fname] = (ann, default)
+      # Apply extensions
+      for item in extend:
+        if isinstance(item, (list, tuple)):
+          if len(item) == 2:
+            xname, xfield = item
+            # Allow (type, default) or FieldInfo as default
+            if isinstance(xfield, tuple) and len(xfield) == 2:
+              field_defs[xname] = xfield
+            else:
+              field_defs[xname] = (Any, xfield)
+          elif len(item) == 3:
+            xname, xtype, xdefault = item
+            field_defs[xname] = (xtype, xdefault)
+      nm = create_model(base_name, __module__ = "odim.dynmodels", __base__=BaseModel, **field_defs)
+      return nm
+    # Pydantic v1 fallback: mutate fields in subclass
     class new_model(model):
       pass
     new_model.__name__ = get_available_class_name( name if name else model.__name__ )
@@ -290,7 +353,8 @@ class ModelFactory(object):
     for name in exclude:
       if name not in extend:
         del new_model.__fields__[name]
-    for xname, xfield in extend:
+    for item in extend:
+      xname, xfield = item if len(item)==2 else (item[0], item[2])
       new_model.__fields__[xname] = xfield
       new_model.__schema_cache__.clear()
     return new_model

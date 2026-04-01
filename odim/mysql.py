@@ -5,7 +5,10 @@ from typing import List, Optional, Union
 
 import aiomysql.cursors
 from pydantic import BaseModel
-from pymysql import escape_string
+try:
+  from pymysql import escape_string
+except Exception:
+  from pymysql.converters import escape_string
 from pymysql.converters import escape_bytes_prefixed, escape_item
 
 from odim import BaseOdimModel, NotFoundException, Odim, Operation, SearchParams, get_connection_info
@@ -231,5 +234,4 @@ class OdimMysql(Odim):
     if self.has_hooks("post_remove"):
       self.execute_hooks("post_remove", x, softdelete=softdelete)
     #TODO detect not found
-
 

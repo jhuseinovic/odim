@@ -7,6 +7,7 @@ from typing import List, Optional, Union
 
 import bson
 from bson import ObjectId as BsonObjectId
+import pydantic as _pydantic
 from pydantic import Field
 from functools import wraps, partial
 import asyncio
@@ -51,9 +52,54 @@ class ObjectId(BsonObjectId):
             raise ValueError('Invalid objectid')
         return BsonObjectId(v)
 
+    # Pydantic v2 JSON schema hook
     @classmethod
-    def __modify_schema__(cls, field_schema):
+    def __get_pydantic_json_schema__(cls, core_schema_, handler):
+        js = handler(core_schema_)
+        try:
+            js.update(type='string')
+        except Exception:
+            pass
+        return js
+
+    # Pydantic v2 core schema: validate from string, then cast to BsonObjectId
+    @classmethod
+    def __get_pydantic_core_schema__(cls, source_type, handler):
+        try:
+            from pydantic_core import core_schema
+            return core_schema.no_info_after_validator_function(
+                cls.validate,
+                core_schema.str_schema(),
+            )
+        except Exception:
+            return handler(source_type)
+
+    # Pydantic v2 core schema: validate from string, then cast to BsonObjectId
+    @classmethod
+    def __get_pydantic_core_schema__(cls, source_type, handler):
+        try:
+            from pydantic_core import core_schema
+            return core_schema.no_info_after_validator_function(
+                cls.validate,
+                core_schema.str_schema(),
+            )
+        except Exception:
+            return handler(source_type)
+
+    # Add v1-only __modify_schema__ dynamically to avoid v2 errors
+    # when pydantic.major < 2
+
+# Attach __modify_schema__ only for pydantic v1
+try:
+    _ver = getattr(getattr(_pydantic, 'version', None), 'VERSION', getattr(_pydantic, '__version__', '2.0'))
+    _major = int(str(_ver).split('.')[0])
+except Exception:
+    _major = 2
+
+if _major < 2:
+    def _pyd1_modify_schema(cls, field_schema):
         field_schema.update(type='string')
+    ObjectId.__modify_schema__ = classmethod(_pyd1_modify_schema)
 
 
 class BaseMongoModel(BaseOdimModel):
